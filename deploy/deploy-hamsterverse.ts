@@ -102,8 +102,8 @@ export default async ({ getNamedAccounts, deployments }: any) => {
                 "ipfs://bafkreiglxpmys7hxse45nd3ajnjzq2vjjevrlwjphtcco3pd53eq6zqu5i"
 
             // Mint initial NFT
-            await contract.safeMint(deployer, uri)
-            console.log(`Minted NFT #0`)
+            // await contract.safeMint(deployer, uri, 200)
+            // console.log(`Minted NFT #0`)
 
             console.log("\nEtherscan verification in progress...")
             await wait(verificationConfig[currentNetwork].waitTime * 1000)

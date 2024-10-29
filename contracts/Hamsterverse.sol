@@ -18,7 +18,6 @@ contract Hamsterverse is ERC721, ERC721Enumerable, ERC721URIStorage {
     address public governanceToken;
 
     mapping(uint256 => mapping(address => uint256)) public _stakes;
-    mapping(uint256 => address) public _delegators;
 
     event Staked(uint256 indexed tokenId, address indexed token, uint256 amount);
     event Withdrawn(uint256 indexed tokenId, address indexed token, uint256 amount);
@@ -35,15 +34,27 @@ contract Hamsterverse is ERC721, ERC721Enumerable, ERC721URIStorage {
     }
 
     /**
-     * @dev Safely mints a new token
+     * @dev Safely mints a new token and stakes tokens in one transaction
      * @param to The address that will own the minted token
      * @param uri The token URI for metadata
+     * @param amount The amount of governance tokens to stake
      */
-    function safeMint(address to, string memory uri) public {
+    function safeMint(address to, string memory uri, uint256 amount) public {
         require(to != address(0), "Cannot mint to zero address");
+        require(amount > 0, "Amount must be greater than 0");
+
         uint256 tokenId = _nextTokenId++;
+
+        // First mint the NFT
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, uri);
+
+        // Then handle the staking
+        if (amount > 0) {
+            IERC20(governanceToken).safeTransferFrom(msg.sender, address(this), amount);
+            _stakes[tokenId][governanceToken] = amount;
+            emit Staked(tokenId, governanceToken, amount);
+        }
     }
 
     /**
@@ -57,11 +68,6 @@ contract Hamsterverse is ERC721, ERC721Enumerable, ERC721URIStorage {
 
         IERC20(governanceToken).safeTransferFrom(msg.sender, address(this), amount);
         _stakes[tokenId][governanceToken] += amount;
-
-        // Only set delegator if not already set
-        if (_delegators[tokenId] == address(0)) {
-            _delegators[tokenId] = msg.sender;
-        }
 
         emit Staked(tokenId, governanceToken, amount);
     }
@@ -114,9 +120,9 @@ contract Hamsterverse is ERC721, ERC721Enumerable, ERC721URIStorage {
      * @param delegatee The address to delegate voting power to
      */
     function delegateStakedTokens(uint256 tokenId, address delegatee) external {
+        require(ownerOf(tokenId) == msg.sender, "Not token owner");
         require(governanceToken != address(0), "Invalid token address");
         require(delegatee != address(0), "Invalid delegatee address");
-        require(msg.sender == _delegators[tokenId], "Invalid delegator");
 
         (bool success, ) = governanceToken.call(
             abi.encodeWithSignature("delegate(address)", delegatee)
