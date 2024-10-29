@@ -2,6 +2,12 @@
 
 Governance tokens staking NFT contract.
 
+Metadata: https://bafkreiglxpmys7hxse45nd3ajnjzq2vjjevrlwjphtcco3pd53eq6zqu5i.ipfs.w3s.link/
+
+Oct 29, 2024 deployment:
+
+
+
 ## Supported networks
 
 -   [OP Mainnet](https://chainlist.org/chain/10) ([docs](https://docs.optimism.io/chain/networks#op-mainnet))
