@@ -1,149 +1,287 @@
 import { expect } from "chai"
 import { ethers } from "hardhat"
-import { Hamsterverse } from "../typechain-types"
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers"
+import { Hamsterverse, MockERC20 } from "../typechain-types"
+import { Signer } from "ethers"
+import { ZeroAddress } from "ethers"
+import { loadFixture } from "@nomicfoundation/hardhat-network-helpers"
 
 describe("Hamsterverse", function () {
+    // Contract instances
     let nft: Hamsterverse
-    let owner: HardhatEthersSigner
-    let addr1: HardhatEthersSigner
-    let addr2: HardhatEthersSigner
+    let governanceToken: MockERC20
 
-    beforeEach(async function () {
-        ;[owner, addr1, addr2] = await ethers.getSigners()
-        const NFTFactory = await ethers.getContractFactory("Hamsterverse")
-        nft = await NFTFactory.deploy(owner.address)
+    // Signers
+    let deployer: Signer
+    let addr1: Signer
+    let addr2: Signer
+    let addr3: Signer
+
+    // Constants
+    const TEST_URI =
+        "ipfs://bafkreiglxpmys7hxse45nd3ajnjzq2vjjevrlwjphtcco3pd53eq6zqu5i"
+    const STAKE_AMOUNT = ethers.parseEther("200")
+    const ADDITIONAL_STAKE = ethers.parseEther("100")
+    const INITIAL_SUPPLY = ethers.parseEther("10000")
+    const PARTIAL_WITHDRAW = ethers.parseEther("50")
+    const TOTAL_NEEDED = STAKE_AMOUNT + ADDITIONAL_STAKE // Using BigInt addition
+
+    async function deployContractFixture() {
+        // Get signers
+        ;[deployer, addr1, addr2, addr3] = await ethers.getSigners()
+
+        // Deploy MockERC20
+        const MockERC20Factory = await ethers.getContractFactory("MockERC20")
+        governanceToken = await MockERC20Factory.deploy()
+        await governanceToken.waitForDeployment()
+
+        // Deploy Hamsterverse
+        const HamsterverseFactory = await ethers.getContractFactory(
+            "Hamsterverse"
+        )
+        nft = await HamsterverseFactory.deploy(
+            await governanceToken.getAddress()
+        )
         await nft.waitForDeployment()
+
+        // Mint initial supply
+        await governanceToken.mint(await deployer.getAddress(), INITIAL_SUPPLY)
+
+        return { nft, governanceToken, deployer, addr1, addr2, addr3 }
+    }
+
+    beforeEach(async () => {
+        const fixture = await loadFixture(deployContractFixture)
+        nft = fixture.nft
+        governanceToken = fixture.governanceToken
+        deployer = fixture.deployer
+        addr1 = fixture.addr1
+        addr2 = fixture.addr2
+        addr3 = fixture.addr3
     })
 
     describe("Deployment", function () {
-        it("Should set the right owner", async function () {
-            expect(await nft.owner()).to.equal(owner.address)
-        })
-
-        it("Should have the correct name and symbol", async function () {
-            expect(await nft.name()).to.equal("Hamsterverse")
-            expect(await nft.symbol()).to.equal("HAM")
-        })
-
-        it("Should mint initial token to owner", async function () {
-            expect(await nft.ownerOf(1)).to.equal(owner.address)
-            expect(await nft.balanceOf(owner.address)).to.equal(1)
-        })
-    })
-
-    describe("Base URI", function () {
-        it("Should return the correct token URI", async function () {
-            expect(await nft.tokenURI(1)).to.equal("x1")
-        })
-    })
-
-    describe("Transfers", function () {
-        it("Should allow owner to transfer their token", async function () {
-            await nft.transferFrom(owner.address, addr1.address, 1)
-            expect(await nft.ownerOf(1)).to.equal(addr1.address)
-            expect(await nft.balanceOf(addr1.address)).to.equal(1)
-            expect(await nft.balanceOf(owner.address)).to.equal(0)
-        })
-
-        it("Should allow approved address to transfer token", async function () {
-            await nft.approve(addr1.address, 1)
-            await nft
-                .connect(addr1)
-                .transferFrom(owner.address, addr2.address, 1)
-            expect(await nft.ownerOf(1)).to.equal(addr2.address)
-        })
-
-        it("Should clear approvals after transfer", async function () {
-            await nft.approve(addr1.address, 1)
-            await nft.transferFrom(owner.address, addr2.address, 1)
-            expect(await nft.getApproved(1)).to.equal(ethers.ZeroAddress)
-        })
-    })
-
-    describe("Approvals", function () {
-        it("Should allow owner to approve another address", async function () {
-            await nft.approve(addr1.address, 1)
-            expect(await nft.getApproved(1)).to.equal(addr1.address)
-        })
-
-        it("Should not allow non-owner to approve", async function () {
-            await expect(
-                nft.connect(addr1).approve(addr2.address, 1)
-            ).to.be.revertedWithCustomError(nft, "ERC721InvalidApprover")
-        })
-
-        it("Should allow owner to set approval for all", async function () {
-            await nft.setApprovalForAll(addr1.address, true)
-            expect(await nft.isApprovedForAll(owner.address, addr1.address)).to
-                .be.true
-        })
-
-        it("Should emit Approval event", async function () {
-            await expect(nft.approve(addr1.address, 1))
-                .to.emit(nft, "Approval")
-                .withArgs(owner.address, addr1.address, 1)
-        })
-
-        it("Should emit ApprovalForAll event", async function () {
-            await expect(nft.setApprovalForAll(addr1.address, true))
-                .to.emit(nft, "ApprovalForAll")
-                .withArgs(owner.address, addr1.address, true)
-        })
-    })
-
-    describe("Error cases", function () {
-        it("Should revert when querying non-existent token", async function () {
-            await expect(nft.ownerOf(2)).to.be.revertedWithCustomError(
-                nft,
-                "ERC721NonexistentToken"
+        it("Should set the correct governance token address", async function () {
+            expect(await nft.governanceToken()).to.equal(
+                await governanceToken.getAddress()
             )
         })
 
-        it("Should revert when transferring token that sender doesn't own", async function () {
+        it("Should revert if deployed with zero address governance token", async function () {
+            const HamsterverseFactory = await ethers.getContractFactory(
+                "Hamsterverse"
+            )
             await expect(
-                nft.connect(addr1).transferFrom(addr1.address, addr2.address, 1)
-            ).to.be.revertedWithCustomError(nft, "ERC721InsufficientApproval")
-        })
-
-        it("Should revert when transferring to zero address", async function () {
-            await expect(
-                nft.transferFrom(owner.address, ethers.ZeroAddress, 1)
-            ).to.be.revertedWithCustomError(nft, "ERC721InvalidReceiver")
+                HamsterverseFactory.deploy(ZeroAddress)
+            ).to.be.revertedWith("Invalid governance token address")
         })
     })
 
-    describe("Ownership", function () {
-        it("Should allow owner to transfer ownership", async function () {
-            await nft.transferOwnership(addr1.address)
-            expect(await nft.owner()).to.equal(addr1.address)
+    describe("Minting", function () {
+        it("Should allow minting NFTs", async function () {
+            await nft.safeMint(await addr1.getAddress(), TEST_URI)
+            expect(await nft.ownerOf(0)).to.equal(await addr1.getAddress())
+            expect(await nft.tokenURI(0)).to.equal(TEST_URI)
         })
 
-        it("Should prevent non-owner from transferring ownership", async function () {
+        it("Should revert when minting to zero address", async function () {
             await expect(
-                nft.connect(addr1).transferOwnership(addr2.address)
-            ).to.be.revertedWithCustomError(nft, "OwnableUnauthorizedAccount")
+                nft.safeMint(ZeroAddress, TEST_URI)
+            ).to.be.revertedWith("Cannot mint to zero address")
         })
 
-        it("Should not allow transferring ownership to zero address", async function () {
-            await expect(
-                nft.transferOwnership(ethers.ZeroAddress)
-            ).to.be.revertedWithCustomError(nft, "OwnableInvalidOwner")
+        it("Should increment token IDs correctly", async function () {
+            await nft.safeMint(await addr1.getAddress(), TEST_URI)
+            await nft.safeMint(await addr2.getAddress(), TEST_URI)
+            expect(await nft.ownerOf(0)).to.equal(await addr1.getAddress())
+            expect(await nft.ownerOf(1)).to.equal(await addr2.getAddress())
         })
     })
 
-    describe("Interface Support", function () {
-        it("Should support required interfaces", async function () {
-            // ERC165 Interface ID
-            expect(await nft.supportsInterface("0x01ffc9a7")).to.be.true
-            // ERC721 Interface ID
-            expect(await nft.supportsInterface("0x80ac58cd")).to.be.true
-            // ERC721Metadata Interface ID
-            expect(await nft.supportsInterface("0x5b5e139f")).to.be.true
+    describe("Staking", function () {
+        beforeEach(async function () {
+            // Mint NFT to addr1
+            await nft.safeMint(await addr1.getAddress(), TEST_URI)
+            // Transfer tokens to addr1
+            await governanceToken.transfer(
+                await addr1.getAddress(),
+                TOTAL_NEEDED
+            )
+            // Approve NFT contract to spend tokens
+            await governanceToken
+                .connect(addr1)
+                .approve(await nft.getAddress(), TOTAL_NEEDED)
         })
 
-        it("Should not support random interface", async function () {
-            expect(await nft.supportsInterface("0x12345678")).to.be.false
+        it("Should allow initial staking of tokens", async function () {
+            await nft.connect(addr1).stake(0, STAKE_AMOUNT)
+            expect(await nft.stakedAmount(0)).to.equal(STAKE_AMOUNT)
+        })
+
+        it("Should allow additional staking of tokens", async function () {
+            await nft.connect(addr1).stake(0, STAKE_AMOUNT)
+            await nft.connect(addr1).stake(0, ADDITIONAL_STAKE)
+            const expectedTotal = STAKE_AMOUNT + ADDITIONAL_STAKE
+            expect(await nft.stakedAmount(0)).to.equal(expectedTotal)
+        })
+
+        it("Should emit Staked event", async function () {
+            await expect(nft.connect(addr1).stake(0, STAKE_AMOUNT))
+                .to.emit(nft, "Staked")
+                .withArgs(0, await governanceToken.getAddress(), STAKE_AMOUNT)
+        })
+
+        it("Should revert if non-owner tries to stake", async function () {
+            await expect(
+                nft.connect(addr2).stake(0, STAKE_AMOUNT)
+            ).to.be.revertedWith("Not token owner")
+        })
+
+        it("Should revert if trying to stake zero amount", async function () {
+            await expect(nft.connect(addr1).stake(0, 0)).to.be.revertedWith(
+                "Amount must be greater than 0"
+            )
+        })
+
+        it("Should revert if trying to stake without sufficient balance", async function () {
+            const largeAmount = ethers.parseEther("20000")
+            await expect(nft.connect(addr1).stake(0, largeAmount)).to.be
+                .reverted
+        })
+    })
+
+    describe("Withdrawing", function () {
+        beforeEach(async function () {
+            // Setup: Mint NFT and stake tokens
+            await nft.safeMint(await addr1.getAddress(), TEST_URI)
+            await governanceToken.transfer(
+                await addr1.getAddress(),
+                STAKE_AMOUNT
+            )
+            await governanceToken
+                .connect(addr1)
+                .approve(await nft.getAddress(), STAKE_AMOUNT)
+            await nft.connect(addr1).stake(0, STAKE_AMOUNT)
+        })
+
+        describe("Partial Withdrawals", function () {
+            it("Should allow partial withdrawal of staked tokens", async function () {
+                await nft.connect(addr1).withdraw(0, PARTIAL_WITHDRAW)
+                const expectedRemaining = STAKE_AMOUNT - PARTIAL_WITHDRAW
+                expect(await nft.stakedAmount(0)).to.equal(expectedRemaining)
+            })
+
+            it("Should emit Withdrawn event for partial withdrawals", async function () {
+                await expect(nft.connect(addr1).withdraw(0, PARTIAL_WITHDRAW))
+                    .to.emit(nft, "Withdrawn")
+                    .withArgs(
+                        0,
+                        await governanceToken.getAddress(),
+                        PARTIAL_WITHDRAW
+                    )
+            })
+
+            it("Should revert if trying to withdraw more than staked amount", async function () {
+                const tooMuch = STAKE_AMOUNT + ethers.parseEther("1")
+                await expect(
+                    nft.connect(addr1).withdraw(0, tooMuch)
+                ).to.be.revertedWith("Insufficient staked amount")
+            })
+        })
+
+        describe("Complete Withdrawals", function () {
+            it("Should allow withdrawing all staked tokens", async function () {
+                await nft.connect(addr1).withdrawAll(0)
+                expect(await nft.stakedAmount(0)).to.equal(0)
+            })
+
+            it("Should emit WithdrawnAll event", async function () {
+                await expect(nft.connect(addr1).withdrawAll(0))
+                    .to.emit(nft, "WithdrawnAll")
+                    .withArgs(
+                        0,
+                        await governanceToken.getAddress(),
+                        STAKE_AMOUNT
+                    )
+            })
+
+            it("Should revert if trying to withdraw with no stakes", async function () {
+                await nft.connect(addr1).withdrawAll(0)
+                await expect(
+                    nft.connect(addr1).withdrawAll(0)
+                ).to.be.revertedWith("No stakes found")
+            })
+        })
+
+        it("Should revert if non-owner tries to withdraw", async function () {
+            await expect(
+                nft.connect(addr2).withdraw(0, PARTIAL_WITHDRAW)
+            ).to.be.revertedWith("Not token owner")
+        })
+
+        it("Should revert if trying to withdraw zero amount", async function () {
+            await expect(nft.connect(addr1).withdraw(0, 0)).to.be.revertedWith(
+                "Amount must be greater than 0"
+            )
+        })
+    })
+
+    describe("Delegation", function () {
+        beforeEach(async function () {
+            // Setup: Mint NFT and stake tokens
+            await nft.safeMint(await addr1.getAddress(), TEST_URI)
+            await governanceToken.transfer(
+                await addr1.getAddress(),
+                STAKE_AMOUNT
+            )
+            await governanceToken
+                .connect(addr1)
+                .approve(await nft.getAddress(), STAKE_AMOUNT)
+            await nft.connect(addr1).stake(0, STAKE_AMOUNT)
+        })
+
+        it("Should allow delegation of staked tokens", async function () {
+            await expect(
+                nft
+                    .connect(addr1)
+                    .delegateStakedTokens(0, await addr2.getAddress())
+            )
+                .to.emit(nft, "Delegated")
+                .withArgs(
+                    await governanceToken.getAddress(),
+                    await addr2.getAddress()
+                )
+        })
+
+        it("Should revert delegation to zero address", async function () {
+            await expect(
+                nft.connect(addr1).delegateStakedTokens(0, ZeroAddress)
+            ).to.be.revertedWith("Invalid delegatee address")
+        })
+
+        it("Should revert if non-delegator tries to delegate", async function () {
+            await expect(
+                nft
+                    .connect(addr2)
+                    .delegateStakedTokens(0, await addr3.getAddress())
+            ).to.be.revertedWith("Invalid delegator")
+        })
+    })
+
+    describe("View Functions", function () {
+        it("Should correctly return staked amount", async function () {
+            await nft.safeMint(await addr1.getAddress(), TEST_URI)
+            expect(await nft.stakedAmount(0)).to.equal(0)
+
+            await governanceToken.transfer(
+                await addr1.getAddress(),
+                STAKE_AMOUNT
+            )
+            await governanceToken
+                .connect(addr1)
+                .approve(await nft.getAddress(), STAKE_AMOUNT)
+            await nft.connect(addr1).stake(0, STAKE_AMOUNT)
+
+            expect(await nft.stakedAmount(0)).to.equal(STAKE_AMOUNT)
         })
     })
 })
