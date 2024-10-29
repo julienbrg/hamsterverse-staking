@@ -1,12 +1,8 @@
 # Hamsterverse
 
-Governance tokens staking NFT contract.
+Allows users to stake governance tokens in an NFT.
 
 Metadata: https://bafkreiglxpmys7hxse45nd3ajnjzq2vjjevrlwjphtcco3pd53eq6zqu5i.ipfs.w3s.link/
-
-Oct 29, 2024 deployment:
-
-
 
 ## Supported networks
 
@@ -55,3 +51,7 @@ pnpm bal <NETWORK_NAME>
 -   Hardhat [v2.19.4](https://github.com/NomicFoundation/hardhat/releases/)
 -   OpenZeppelin Contracts [v5.1.0](https://github.com/OpenZeppelin/openzeppelin-contracts/releases/tag/v5.1.0)
 -   Ethers [v6.10.0](https://docs.ethers.org/v6/)
+
+## Support
+
+You can contact Julien via [Element](https://matrix.to/#/@julienbrg:matrix.org), [Farcaster](https://warpcast.com/julien-), [Telegram](https://t.me/julienbrg), [Twitter](https://twitter.com/julienbrg), [Discord](https://discordapp.com/users/julienbrg), or [LinkedIn](https://www.linkedin.com/in/julienberanger/).
