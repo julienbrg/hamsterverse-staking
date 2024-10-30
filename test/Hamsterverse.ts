@@ -91,7 +91,7 @@ describe("Hamsterverse", function () {
         it("Should mint NFT and stake tokens in one transaction", async function () {
             await nft
                 .connect(addr1)
-                .safeMint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
 
             // Check NFT ownership
             expect(await nft.ownerOf(0)).to.equal(await addr1.getAddress())
@@ -104,7 +104,7 @@ describe("Hamsterverse", function () {
         it("Should emit both Transfer and Staked events", async function () {
             const tx = await nft
                 .connect(addr1)
-                .safeMint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
 
             await expect(tx)
                 .to.emit(nft, "Transfer")
@@ -117,15 +117,13 @@ describe("Hamsterverse", function () {
 
         it("Should revert if minting with zero stake amount", async function () {
             await expect(
-                nft
-                    .connect(addr1)
-                    .safeMint(await addr1.getAddress(), TEST_URI, 0)
+                nft.connect(addr1).mint(await addr1.getAddress(), TEST_URI, 0)
             ).to.be.revertedWith("Amount must be greater than 0")
         })
 
         it("Should revert if minting to zero address", async function () {
             await expect(
-                nft.connect(addr1).safeMint(ZeroAddress, TEST_URI, STAKE_AMOUNT)
+                nft.connect(addr1).mint(ZeroAddress, TEST_URI, STAKE_AMOUNT)
             ).to.be.revertedWith("Cannot mint to zero address")
         })
 
@@ -138,7 +136,7 @@ describe("Hamsterverse", function () {
             await expect(
                 nft
                     .connect(addr1)
-                    .safeMint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                    .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
             ).to.be.reverted
         })
 
@@ -147,14 +145,14 @@ describe("Hamsterverse", function () {
             await expect(
                 nft
                     .connect(addr1)
-                    .safeMint(await addr1.getAddress(), TEST_URI, largeAmount)
+                    .mint(await addr1.getAddress(), TEST_URI, largeAmount)
             ).to.be.reverted
         })
 
         it("Should increment token IDs correctly", async function () {
             await nft
                 .connect(addr1)
-                .safeMint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
             await governanceToken.transfer(
                 await addr2.getAddress(),
                 STAKE_AMOUNT
@@ -164,7 +162,7 @@ describe("Hamsterverse", function () {
                 .approve(await nft.getAddress(), STAKE_AMOUNT)
             await nft
                 .connect(addr2)
-                .safeMint(await addr2.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr2.getAddress(), TEST_URI, STAKE_AMOUNT)
 
             expect(await nft.ownerOf(0)).to.equal(await addr1.getAddress())
             expect(await nft.ownerOf(1)).to.equal(await addr2.getAddress())
@@ -185,7 +183,7 @@ describe("Hamsterverse", function () {
             // Mint NFT with initial stake
             await nft
                 .connect(addr1)
-                .safeMint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
         })
 
         it("Should allow additional staking of tokens", async function () {
@@ -231,7 +229,7 @@ describe("Hamsterverse", function () {
             // Mint NFT with initial stake
             await nft
                 .connect(addr1)
-                .safeMint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
         })
 
         describe("Partial Withdrawals", function () {
@@ -310,16 +308,32 @@ describe("Hamsterverse", function () {
             // Mint NFT with initial stake
             await nft
                 .connect(addr1)
-                .safeMint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
         })
 
         it("Should allow NFT owner to delegate staked tokens", async function () {
-            await expect(
-                nft
-                    .connect(addr1)
-                    .delegateStakedTokens(0, await addr2.getAddress())
-            )
-                .to.emit(nft, "Delegated")
+            const delegateTx = nft
+                .connect(addr1)
+                .delegateStakedTokens(0, await addr2.getAddress())
+
+            // Check for DelegatedToken event from main contract
+            await expect(delegateTx)
+                .to.emit(nft, "DelegatedToken")
+                .withArgs(
+                    0, // tokenId
+                    await governanceToken.getAddress(),
+                    await addr2.getAddress()
+                )
+
+            // Get proxy address
+            const proxyAddress = await nft.stakeProxies(0)
+
+            // Check for DelegatedFromProxy event from proxy contract
+            await expect(delegateTx)
+                .to.emit(
+                    await ethers.getContractAt("StakeProxy", proxyAddress),
+                    "DelegatedFromProxy"
+                )
                 .withArgs(
                     await governanceToken.getAddress(),
                     await addr2.getAddress()
@@ -355,7 +369,7 @@ describe("Hamsterverse", function () {
         it("Should correctly return staked amount", async function () {
             await nft
                 .connect(addr1)
-                .safeMint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
             expect(await nft.stakedAmount(0)).to.equal(STAKE_AMOUNT)
         })
 

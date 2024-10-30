@@ -136,14 +136,9 @@ export default async ({ getNamedAccounts, deployments }: any) => {
             await wait(5000)
 
             // Mint NFT with staking using increased gas price
-            const mintTx = await nftContract.safeMint(
-                deployer,
-                uri,
-                stakeAmount,
-                {
-                    gasPrice: increasedGasPrice
-                }
-            )
+            const mintTx = await nftContract.mint(deployer, uri, stakeAmount, {
+                gasPrice: increasedGasPrice
+            })
             await mintTx.wait(1) // Wait for mint confirmation
             console.log("Minted NFT #0")
 
