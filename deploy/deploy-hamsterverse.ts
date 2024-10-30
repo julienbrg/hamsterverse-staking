@@ -15,7 +15,8 @@ export default async ({ getNamedAccounts, deployments }: any) => {
     const mockToken = await deploy("MockERC20", {
         from: deployer,
         args: [],
-        log: true
+        log: true,
+        waitConfirmations: 1
     })
 
     const verificationConfig = {
@@ -49,15 +50,21 @@ export default async ({ getNamedAccounts, deployments }: any) => {
             )
 
             console.log("\nMinting initial tokens...")
-            const contract = await hre.ethers.getContractAt(
+            const tokenContract = await hre.ethers.getContractAt(
                 "MockERC20",
                 mockToken.address
             )
             const amount = hre.ethers.parseEther("10000")
-            await contract.mint(deployer, amount)
+
+            const mintTx = await tokenContract.mint(deployer, amount)
+            await mintTx.wait(1) // Wait for transaction confirmation
+
             console.log(
                 `Minted ${hre.ethers.formatEther(amount)} tokens to ${deployer}`
             )
+
+            // Add delay between transactions
+            await wait(5000)
 
             console.log("\nEtherscan verification in progress...")
             await wait(verificationConfig[currentNetwork].waitTime * 1000)
@@ -77,7 +84,8 @@ export default async ({ getNamedAccounts, deployments }: any) => {
     const hamsterverse = await deploy("Hamsterverse", {
         from: deployer,
         args: [mockToken.address],
-        log: true
+        log: true,
+        waitConfirmations: 1
     })
 
     if (currentNetwork in verificationConfig) {
@@ -93,17 +101,51 @@ export default async ({ getNamedAccounts, deployments }: any) => {
                     hamsterverse.address
             )
 
-            console.log("\nUploading metadata and minting initial NFTs...")
-            const contract = await hre.ethers.getContractAt(
+            console.log("\nApproving and minting initial NFT...")
+            const tokenContract = await hre.ethers.getContractAt(
+                "MockERC20",
+                mockToken.address
+            )
+            const nftContract = await hre.ethers.getContractAt(
                 "Hamsterverse",
                 hamsterverse.address
             )
+
             const uri =
                 "ipfs://bafkreiglxpmys7hxse45nd3ajnjzq2vjjevrlwjphtcco3pd53eq6zqu5i"
+            const stakeAmount = hre.ethers.parseEther("200")
 
-            // Mint initial NFT
-            // await contract.safeMint(deployer, uri, 200)
-            // console.log(`Minted NFT #0`)
+            // Get current gas price and increase it by 20%
+            const gasPrice = (await hre.ethers.provider.getFeeData()).gasPrice
+            const increasedGasPrice = gasPrice
+                ? (gasPrice * 120n) / 100n
+                : undefined
+
+            // Approve NFT contract to spend tokens with increased gas price
+            const approveTx = await tokenContract.approve(
+                hamsterverse.address,
+                stakeAmount,
+                {
+                    gasPrice: increasedGasPrice
+                }
+            )
+            await approveTx.wait(1) // Wait for approval confirmation
+            console.log("Approved token spending")
+
+            // Add delay between transactions
+            await wait(5000)
+
+            // Mint NFT with staking using increased gas price
+            const mintTx = await nftContract.safeMint(
+                deployer,
+                uri,
+                stakeAmount,
+                {
+                    gasPrice: increasedGasPrice
+                }
+            )
+            await mintTx.wait(1) // Wait for mint confirmation
+            console.log("Minted NFT #0")
 
             console.log("\nEtherscan verification in progress...")
             await wait(verificationConfig[currentNetwork].waitTime * 1000)
