@@ -13,7 +13,10 @@ const {
     OPTIMISM_MAINNET_PRIVATE_KEY,
     OP_ETHERSCAN_API_KEY,
     OP_SEPOLIA_RPC_ENDPOINT_URL,
-    OP_SEPOLIA_PRIVATE_KEY
+    OP_SEPOLIA_PRIVATE_KEY,
+    BASE_MAINNET_RPC_ENDPOINT_URL,
+    BASE_MAINNET_PRIVATE_KEY,
+    BASE_ETHERSCAN_API_KEY
 } = process.env
 
 const config: HardhatUserConfig = {
@@ -46,12 +49,18 @@ const config: HardhatUserConfig = {
         },
         "op-sepolia": {
             chainId: 11155420,
-            url:
-                OP_SEPOLIA_RPC_ENDPOINT_URL ||
-                "https://ethereum-sepolia.publicnode.com",
+            url: OP_SEPOLIA_RPC_ENDPOINT_URL || "https://sepolia.optimism.io",
             accounts:
                 OP_SEPOLIA_PRIVATE_KEY !== undefined
                     ? [OP_SEPOLIA_PRIVATE_KEY]
+                    : []
+        },
+        base: {
+            chainId: 8453,
+            url: BASE_MAINNET_RPC_ENDPOINT_URL || "https://mainnet.base.org",
+            accounts:
+                BASE_MAINNET_PRIVATE_KEY !== undefined
+                    ? [BASE_MAINNET_PRIVATE_KEY]
                     : []
         }
     },
@@ -68,7 +77,8 @@ const config: HardhatUserConfig = {
         apiKey: {
             sepolia: ETHERSCAN_API_KEY || "",
             optimisticEthereum: OP_ETHERSCAN_API_KEY || "",
-            "op-sepolia": OP_ETHERSCAN_API_KEY || ""
+            "op-sepolia": OP_ETHERSCAN_API_KEY || "",
+            base: BASE_ETHERSCAN_API_KEY || ""
         },
         customChains: [
             {
@@ -77,6 +87,14 @@ const config: HardhatUserConfig = {
                 urls: {
                     apiURL: "https://api-sepolia-optimistic.etherscan.io/api",
                     browserURL: "https://sepolia-optimism.etherscan.io"
+                }
+            },
+            {
+                network: "base",
+                chainId: 8453,
+                urls: {
+                    apiURL: "https://api.basescan.org/api",
+                    browserURL: "https://basescan.org"
                 }
             }
         ]

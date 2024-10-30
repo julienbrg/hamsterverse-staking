@@ -6,8 +6,9 @@
     "scripts": {
         "test": "hardhat test",
         "compile": "hardhat compile",
-        "deploy:sepolia": "hardhat deploy --network sepolia --reset",
         "deploy:optimism": "hardhat deploy --network optimism --reset",
+        "deploy:base": "hardhat deploy --network base --reset",
+        "deploy:sepolia": "hardhat deploy --network sepolia --reset",
         "deploy:op-sepolia": "hardhat deploy --network op-sepolia --reset",
         "bal": "npx hardhat run scripts/check-my-balance.ts --network",
         "prettier": "prettier --write \"**/*.ts\"",
