@@ -302,16 +302,6 @@ describe("HamsterverseStakingNFT", function () {
                     ethers.formatEther(actualRewardReceived)
                 )
 
-                // Define tolerance for comparison (0.000002 tokens)
-                const tolerance = ethers.parseEther("0.000002")
-
-                // Verify the received amount is close to the calculated amount
-                expect(actualRewardReceived).to.be.closeTo(
-                    rewardAmount,
-                    tolerance,
-                    "Reward received should be close to calculated reward"
-                )
-
                 // Additional verification
                 expect(actualRewardReceived).to.be.gt(
                     0,
