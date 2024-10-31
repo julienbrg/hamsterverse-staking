@@ -26,7 +26,7 @@ describe("HamsterverseStakingNFT", function () {
     const STAKE_AMOUNT = ethers.parseEther("200")
     const ADDITIONAL_STAKE = ethers.parseEther("100")
     const INITIAL_SUPPLY = ethers.parseEther("10000")
-    const DISTRIBUTION_RATE = ethers.parseEther("0.1") // 0.1 tokens per second
+    const DISTRIBUTION_RATE = ethers.parseEther("1") // 1 token per second
     const REWARD_DEPOSIT = ethers.parseEther("1000") // 1000 tokens for rewards
     const ONE_DAY = 24 * 60 * 60
     const ONE_WEEK = 7 * ONE_DAY

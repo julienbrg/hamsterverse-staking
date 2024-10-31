@@ -8,7 +8,7 @@ function wait(ms: number): Promise<void> {
 }
 
 const GOVERNANCE_TOKEN_ADDRESS = "0x11dc980faf34a1d082ae8a6a883db3a950a3c6e8"
-const DISTRIBUTION_RATE = hre.ethers.parseEther("0.1") // 0.1 tokens per second
+const DISTRIBUTION_RATE = hre.ethers.parseEther("1") // 1 token per second
 
 export default async ({ getNamedAccounts, deployments }: any) => {
     const { deploy } = deployments
@@ -21,15 +21,15 @@ export default async ({ getNamedAccounts, deployments }: any) => {
             explorerUrl: "https://sepolia.etherscan.io/address/",
             needsMockToken: true
         },
-        optimism: {
-            waitTime: 20,
-            explorerUrl: "https://optimistic.etherscan.io/address/",
-            needsMockToken: false
-        },
         "op-sepolia": {
             waitTime: 90,
             explorerUrl: "https://sepolia-optimism.etherscan.io/address/",
             needsMockToken: true
+        },
+        optimism: {
+            waitTime: 20,
+            explorerUrl: "https://optimistic.etherscan.io/address/",
+            needsMockToken: false
         },
         base: {
             waitTime: 20,
