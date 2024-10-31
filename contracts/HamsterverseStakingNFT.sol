@@ -61,7 +61,6 @@ contract HamsterverseStakingNFT is
         distributionRate = _initialDistributionRate;
     }
 
-    // Modifier to restrict access to the owner of a specific tokenId
     modifier onlyTokenOwner(uint256 tokenId) {
         if (ownerOf(tokenId) != msg.sender) revert NotTokenOwner(tokenId, msg.sender);
         _;
@@ -69,7 +68,7 @@ contract HamsterverseStakingNFT is
 
     /**
      * @dev Internal function to update staking time for a specific NFT.
-     * Should be called before any stake modifications.
+     * Should be called before any stake modifications or reward calculations.
      * @param tokenId The ID of the NFT whose staking time is being updated.
      */
     function _updateStakeTime(uint256 tokenId) internal {
@@ -77,8 +76,15 @@ contract HamsterverseStakingNFT is
         address proxy = stakeProxies[tokenId];
         uint256 stakedAmount = IERC20(governanceToken).balanceOf(proxy);
 
-        // Only update if there's a valid last reward timestamp and stake amount
-        if (stakedAmount > 0 && data.lastRewardTimestamp > 0) {
+        // Initialize lastRewardTimestamp if not set
+        if (data.lastRewardTimestamp == 0) {
+            data.lastRewardTimestamp = data.stakeTimestamp > 0
+                ? data.stakeTimestamp
+                : block.timestamp;
+        }
+
+        // Only update if there's a stake amount
+        if (stakedAmount > 0) {
             uint256 duration = block.timestamp - data.lastRewardTimestamp;
             uint256 newStakeSeconds = stakedAmount * duration;
 
@@ -217,6 +223,7 @@ contract HamsterverseStakingNFT is
         uint256 tokenId,
         address delegatee
     ) external onlyTokenOwner(tokenId) {
+        _updateStakeTime(tokenId);
         require(delegatee != address(0), "Invalid delegatee address");
 
         address proxy = stakeProxies[tokenId];
@@ -245,15 +252,12 @@ contract HamsterverseStakingNFT is
         distributionRate = rate;
     }
 
-    /**
-     * @notice Allows NFT owners to withdraw staked tokens and accrued rewards.
-     * @param tokenId The ID of the NFT from which tokens are being withdrawn.
-     * @param amount The amount of staked tokens to withdraw.
-     */
     function withdraw(
         uint256 tokenId,
         uint256 amount
     ) external nonReentrant onlyTokenOwner(tokenId) {
+        _updateStakeTime(tokenId);
+
         if (amount == 0) revert InvalidAmount();
 
         address proxy = stakeProxies[tokenId];
@@ -264,11 +268,13 @@ contract HamsterverseStakingNFT is
             revert InsufficientStake(amount, currentStake);
         }
 
-        // Process any pending rewards first
-        _processRewards(tokenId);
-
         // For complete withdrawals, clean up all state
         if (amount == currentStake) {
+            // Update total stake seconds before deleting data
+            if (currentStake > 0 && _stakeData[tokenId].lastRewardTimestamp > 0) {
+                uint256 duration = block.timestamp - _stakeData[tokenId].lastRewardTimestamp;
+                totalStakeSeconds -= (currentStake * duration);
+            }
             delete _stakeData[tokenId];
         }
 
@@ -282,6 +288,7 @@ contract HamsterverseStakingNFT is
      * @param tokenId The ID of the NFT for which rewards are being withdrawn.
      */
     function withdrawRewards(uint256 tokenId) public nonReentrant onlyTokenOwner(tokenId) {
+        _updateStakeTime(tokenId);
         uint256 reward = _processRewards(tokenId);
         if (reward == 0) revert NoRewardsAvailable();
     }
@@ -292,12 +299,13 @@ contract HamsterverseStakingNFT is
      * @param amount The amount of tokens to add to the existing stake.
      */
     function addStake(uint256 tokenId, uint256 amount) external onlyTokenOwner(tokenId) {
+        _updateStakeTime(tokenId);
+
         if (amount == 0) revert InvalidAmount();
 
         address proxy = stakeProxies[tokenId];
         if (proxy == address(0)) revert InvalidAddress();
 
-        _updateStakeTime(tokenId);
         IERC20(governanceToken).transferFrom(msg.sender, proxy, amount);
         emit Staked(tokenId, governanceToken, amount);
     }
@@ -313,8 +321,6 @@ contract HamsterverseStakingNFT is
         IERC20(governanceToken).transfer(to, rewardPoolBalance);
         emit EscapeHatchActivated(to, rewardPoolBalance);
     }
-
-    // GETTERS
 
     /**
      * @notice Provides staking information for a given NFT.
@@ -334,13 +340,22 @@ contract HamsterverseStakingNFT is
         )
     {
         if (ownerOf(tokenId) == address(0)) revert InvalidTokenId();
+
         address proxy = stakeProxies[tokenId];
         StakeData storage data = _stakeData[tokenId];
+        uint256 currentStake = IERC20(governanceToken).balanceOf(proxy);
+
+        // Calculate current accumulated stake seconds
+        uint256 currentAccumulatedSeconds = data.accumulatedStakeSeconds;
+        if (currentStake > 0 && data.lastRewardTimestamp > 0) {
+            uint256 duration = block.timestamp - data.lastRewardTimestamp;
+            currentAccumulatedSeconds += (currentStake * duration);
+        }
 
         return (
-            IERC20(governanceToken).balanceOf(proxy),
+            currentStake,
             data.stakeTimestamp,
-            data.accumulatedStakeSeconds,
+            currentAccumulatedSeconds,
             _calculateReward(tokenId),
             proxy
         );
@@ -412,8 +427,11 @@ contract HamsterverseStakingNFT is
         return (distributionRate * SCALING_FACTOR) / totalStakedTokens;
     }
 
-    // The following functions are overrides required by Solidity.
+    // OpenZeppelin contract overrides
 
+    /**
+     * @dev Update hook for ERC721 token transfers.
+     */
     function _update(
         address to,
         uint256 tokenId,
@@ -422,6 +440,9 @@ contract HamsterverseStakingNFT is
         return super._update(to, tokenId, auth);
     }
 
+    /**
+     * @dev Hook for increasing token balance.
+     */
     function _increaseBalance(
         address account,
         uint128 value
@@ -429,12 +450,18 @@ contract HamsterverseStakingNFT is
         super._increaseBalance(account, value);
     }
 
+    /**
+     * @dev Returns the token URI.
+     */
     function tokenURI(
         uint256 tokenId
     ) public view override(ERC721, ERC721URIStorage) returns (string memory) {
         return super.tokenURI(tokenId);
     }
 
+    /**
+     * @dev ERC165 interface support.
+     */
     function supportsInterface(
         bytes4 interfaceId
     ) public view override(ERC721, ERC721Enumerable, ERC721URIStorage) returns (bool) {

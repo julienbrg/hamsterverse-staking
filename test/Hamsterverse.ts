@@ -170,6 +170,7 @@ describe("HamsterverseStakingNFT", function () {
                     deployFixture
                 )
 
+                // Initial stake
                 await governanceToken
                     .connect(addr1)
                     .approve(await nft.getAddress(), STAKE_AMOUNT)
@@ -177,15 +178,28 @@ describe("HamsterverseStakingNFT", function () {
                     .connect(addr1)
                     .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
 
+                // Store initial balances
                 const initialBalance = await governanceToken.balanceOf(
                     await addr1.getAddress()
                 )
+
+                // Get initial rewards (should be 0 as no time has passed)
+                const initialRewards = await nft.getAccruedRewards(0)
+                expect(initialRewards).to.equal(0)
+
+                // Perform withdrawal
                 await nft.connect(addr1).withdraw(0, STAKE_AMOUNT)
 
+                // Check final balance - should be exactly STAKE_AMOUNT more than initial
                 const finalBalance = await governanceToken.balanceOf(
                     await addr1.getAddress()
                 )
                 expect(finalBalance - initialBalance).to.equal(STAKE_AMOUNT)
+
+                // Verify stake data is cleaned up
+                const stakeInfo = await nft.getStakeInfo(0)
+                expect(stakeInfo.stakedAmount).to.equal(0)
+                expect(stakeInfo.accumulatedStakeSeconds).to.equal(0)
             })
 
             it("Should allow partial withdrawal", async function () {
@@ -193,6 +207,7 @@ describe("HamsterverseStakingNFT", function () {
                     deployFixture
                 )
 
+                // Initial stake
                 await governanceToken
                     .connect(addr1)
                     .approve(await nft.getAddress(), STAKE_AMOUNT)
@@ -200,13 +215,64 @@ describe("HamsterverseStakingNFT", function () {
                     .connect(addr1)
                     .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
 
+                // Store initial balances
+                const initialBalance = await governanceToken.balanceOf(
+                    await addr1.getAddress()
+                )
+
+                // Get initial rewards (should be 0 as no time has passed)
+                const initialRewards = await nft.getAccruedRewards(0)
+                expect(initialRewards).to.equal(0)
+
+                // Calculate withdrawal amount
                 const withdrawAmount = STAKE_AMOUNT / 2n
+
+                // Perform partial withdrawal
                 await nft.connect(addr1).withdraw(0, withdrawAmount)
 
+                // Check final balance - should be exactly withdrawAmount more than initial
+                const finalBalance = await governanceToken.balanceOf(
+                    await addr1.getAddress()
+                )
+                expect(finalBalance - initialBalance).to.equal(withdrawAmount)
+
+                // Verify remaining stake
                 const stakeInfo = await nft.getStakeInfo(0)
                 expect(stakeInfo.stakedAmount).to.equal(
                     STAKE_AMOUNT - withdrawAmount
                 )
+            })
+
+            it("Should allow rewards to be withdrawn separately", async function () {
+                const { nft, governanceToken, addr1 } = await loadFixture(
+                    deployFixture
+                )
+
+                // Initial stake
+                await governanceToken
+                    .connect(addr1)
+                    .approve(await nft.getAddress(), STAKE_AMOUNT)
+                await nft
+                    .connect(addr1)
+                    .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+
+                // Advance time to accumulate rewards
+                await time.increase(ONE_DAY)
+
+                // Withdraw rewards first
+                await nft.connect(addr1).withdrawRewards(0)
+
+                // Then perform withdrawal
+                const initialBalance = await governanceToken.balanceOf(
+                    await addr1.getAddress()
+                )
+                await nft.connect(addr1).withdraw(0, STAKE_AMOUNT)
+                const finalBalance = await governanceToken.balanceOf(
+                    await addr1.getAddress()
+                )
+
+                // Verify exact stake amount withdrawn
+                expect(finalBalance - initialBalance).to.equal(STAKE_AMOUNT)
             })
         })
 
