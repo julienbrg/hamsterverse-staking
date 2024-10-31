@@ -31,6 +31,10 @@ export default async ({ getNamedAccounts, deployments }: any) => {
         "op-sepolia": {
             waitTime: 90,
             explorerUrl: "https://sepolia-optimism.etherscan.io/address/"
+        },
+        base: {
+            waitTime: 20,
+            explorerUrl: "https://basescan.org/address/"
         }
     }
 
@@ -57,13 +61,12 @@ export default async ({ getNamedAccounts, deployments }: any) => {
             const amount = hre.ethers.parseEther("10000")
 
             const mintTx = await tokenContract.mint(deployer, amount)
-            await mintTx.wait(1) // Wait for transaction confirmation
+            await mintTx.wait(1)
 
             console.log(
                 `Minted ${hre.ethers.formatEther(amount)} tokens to ${deployer}`
             )
 
-            // Add delay between transactions
             await wait(5000)
 
             console.log("\nEtherscan verification in progress...")
@@ -115,13 +118,11 @@ export default async ({ getNamedAccounts, deployments }: any) => {
                 "ipfs://bafkreiglxpmys7hxse45nd3ajnjzq2vjjevrlwjphtcco3pd53eq6zqu5i"
             const stakeAmount = hre.ethers.parseEther("200")
 
-            // Get current gas price and increase it by 20%
             const gasPrice = (await hre.ethers.provider.getFeeData()).gasPrice
             const increasedGasPrice = gasPrice
                 ? (gasPrice * 120n) / 100n
                 : undefined
 
-            // Approve NFT contract to spend tokens with increased gas price
             const approveTx = await tokenContract.approve(
                 hamsterverse.address,
                 stakeAmount,
@@ -129,17 +130,15 @@ export default async ({ getNamedAccounts, deployments }: any) => {
                     gasPrice: increasedGasPrice
                 }
             )
-            await approveTx.wait(1) // Wait for approval confirmation
+            await approveTx.wait(1)
             console.log("Approved token spending")
 
-            // Add delay between transactions
             await wait(5000)
 
-            // Mint NFT with staking using increased gas price
             const mintTx = await nftContract.mint(deployer, uri, stakeAmount, {
                 gasPrice: increasedGasPrice
             })
-            await mintTx.wait(1) // Wait for mint confirmation
+            await mintTx.wait(1)
             console.log("Minted NFT #0")
 
             console.log("\nEtherscan verification in progress...")
