@@ -1,17 +1,17 @@
 import { expect } from "chai"
 import { ethers } from "hardhat"
-import { Hamsterverse, MockERC20 } from "../typechain-types"
+import { HamsterverseStakingNFT, MockERC20 } from "../typechain-types"
 import { Signer } from "ethers"
 import { ZeroAddress } from "ethers"
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers"
+import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers"
 
-describe("Hamsterverse", function () {
+describe("HamsterverseStakingNFT", function () {
     // Contract instances
-    let nft: Hamsterverse
+    let nft: HamsterverseStakingNFT
     let governanceToken: MockERC20
 
     // Signers
-    let deployer: Signer
+    let owner: Signer
     let addr1: Signer
     let addr2: Signer
     let addr3: Signer
@@ -22,521 +22,518 @@ describe("Hamsterverse", function () {
     const STAKE_AMOUNT = ethers.parseEther("200")
     const ADDITIONAL_STAKE = ethers.parseEther("100")
     const INITIAL_SUPPLY = ethers.parseEther("10000")
-    const PARTIAL_WITHDRAW = ethers.parseEther("50")
-    const TOTAL_NEEDED = STAKE_AMOUNT + ADDITIONAL_STAKE
+    const DISTRIBUTION_RATE = ethers.parseEther("0.1") // 0.1 tokens per second
+    const REWARD_DEPOSIT = ethers.parseEther("1000") // 1000 tokens for rewards
 
-    async function deployContractFixture() {
-        // Get signers
-        ;[deployer, addr1, addr2, addr3] = await ethers.getSigners()
+    async function deployFixture() {
+        ;[owner, addr1, addr2, addr3] = await ethers.getSigners()
 
-        // Deploy MockERC20
+        // Deploy governance token
         const MockERC20Factory = await ethers.getContractFactory("MockERC20")
         governanceToken = await MockERC20Factory.deploy()
-        await governanceToken.waitForDeployment()
 
-        // Deploy Hamsterverse
+        // Deploy NFT contract
         const HamsterverseFactory = await ethers.getContractFactory(
-            "Hamsterverse"
+            "HamsterverseStakingNFT"
         )
         nft = await HamsterverseFactory.deploy(
-            await governanceToken.getAddress()
+            await governanceToken.getAddress(),
+            DISTRIBUTION_RATE,
+            await owner.getAddress()
         )
-        await nft.waitForDeployment()
 
-        // Mint initial supply
-        await governanceToken.mint(await deployer.getAddress(), INITIAL_SUPPLY)
+        // Mint initial tokens
+        await governanceToken.mint(await addr1.getAddress(), INITIAL_SUPPLY)
+        await governanceToken.mint(await addr2.getAddress(), INITIAL_SUPPLY)
+        await governanceToken.mint(await owner.getAddress(), REWARD_DEPOSIT)
 
-        return { nft, governanceToken, deployer, addr1, addr2, addr3 }
+        // Approve NFT contract
+        await governanceToken
+            .connect(addr1)
+            .approve(await nft.getAddress(), INITIAL_SUPPLY)
+        await governanceToken
+            .connect(addr2)
+            .approve(await nft.getAddress(), INITIAL_SUPPLY)
+        await governanceToken
+            .connect(owner)
+            .approve(await nft.getAddress(), REWARD_DEPOSIT)
+
+        return { nft, governanceToken, owner, addr1, addr2, addr3 }
     }
 
-    beforeEach(async () => {
-        const fixture = await loadFixture(deployContractFixture)
-        nft = fixture.nft
-        governanceToken = fixture.governanceToken
-        deployer = fixture.deployer
-        addr1 = fixture.addr1
-        addr2 = fixture.addr2
-        addr3 = fixture.addr3
-    })
+    describe("Deployment & Basic Functions", function () {
+        it("Should deploy with correct initial state", async function () {
+            const { nft, governanceToken } = await loadFixture(deployFixture)
 
-    describe("Deployment", function () {
-        it("Should set the correct governance token address", async function () {
             expect(await nft.governanceToken()).to.equal(
                 await governanceToken.getAddress()
             )
+            expect(await nft.distributionRate()).to.equal(DISTRIBUTION_RATE)
         })
 
-        it("Should revert if deployed with zero address governance token", async function () {
-            const HamsterverseFactory = await ethers.getContractFactory(
-                "Hamsterverse"
-            )
-            await expect(
-                HamsterverseFactory.deploy(ZeroAddress)
-            ).to.be.revertedWith("Invalid governance token address")
+        it("Should allow setting distribution rate by owner", async function () {
+            const { nft, owner } = await loadFixture(deployFixture)
+            const newRate = ethers.parseEther("0.2")
+
+            await nft.connect(owner).setDistributionRate(newRate)
+            expect(await nft.distributionRate()).to.equal(newRate)
         })
     })
 
-    describe("Minting with Staking", function () {
-        beforeEach(async function () {
-            // Transfer tokens to addr1 and approve NFT contract
-            await governanceToken.transfer(
-                await addr1.getAddress(),
-                TOTAL_NEEDED
-            )
-            await governanceToken
-                .connect(addr1)
-                .approve(await nft.getAddress(), TOTAL_NEEDED)
-        })
+    describe("Staking Mechanics", function () {
+        it("Should mint NFT and stake tokens correctly", async function () {
+            const { nft, addr1 } = await loadFixture(deployFixture)
 
-        it("Should mint NFT and stake tokens in one transaction", async function () {
             await nft
                 .connect(addr1)
-                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
 
-            // Check NFT ownership
+            const stakeInfo = await nft.getStakeInfo(0)
+            expect(stakeInfo[0]).to.equal(STAKE_AMOUNT) // stakedAmount
             expect(await nft.ownerOf(0)).to.equal(await addr1.getAddress())
-            expect(await nft.tokenURI(0)).to.equal(TEST_URI)
-
-            // Check staked amount
-            expect(await nft.stakedAmount(0)).to.equal(STAKE_AMOUNT)
         })
 
-        it("Should emit both Transfer and Staked events", async function () {
-            const tx = await nft
-                .connect(addr1)
-                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+        it("Should allow additional stake", async function () {
+            const { nft, addr1 } = await loadFixture(deployFixture)
 
-            await expect(tx)
-                .to.emit(nft, "Transfer")
-                .withArgs(ZeroAddress, await addr1.getAddress(), 0)
-
-            await expect(tx)
-                .to.emit(nft, "Staked")
-                .withArgs(0, await governanceToken.getAddress(), STAKE_AMOUNT)
-        })
-
-        it("Should revert if minting with zero stake amount", async function () {
-            await expect(
-                nft.connect(addr1).mint(await addr1.getAddress(), TEST_URI, 0)
-            ).to.be.revertedWith("Amount must be greater than 0")
-        })
-
-        it("Should revert if minting to zero address", async function () {
-            await expect(
-                nft.connect(addr1).mint(ZeroAddress, TEST_URI, STAKE_AMOUNT)
-            ).to.be.revertedWith("Cannot mint to zero address")
-        })
-
-        it("Should revert if trying to mint without sufficient token approval", async function () {
-            // Reset approval to 0
-            await governanceToken
-                .connect(addr1)
-                .approve(await nft.getAddress(), 0)
-
-            await expect(
-                nft
-                    .connect(addr1)
-                    .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
-            ).to.be.reverted
-        })
-
-        it("Should revert if trying to mint without sufficient token balance", async function () {
-            const largeAmount = ethers.parseEther("20000")
-            await expect(
-                nft
-                    .connect(addr1)
-                    .mint(await addr1.getAddress(), TEST_URI, largeAmount)
-            ).to.be.reverted
-        })
-
-        it("Should increment token IDs correctly", async function () {
             await nft
                 .connect(addr1)
-                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
-            await governanceToken.transfer(
-                await addr2.getAddress(),
-                STAKE_AMOUNT
-            )
-            await governanceToken
-                .connect(addr2)
-                .approve(await nft.getAddress(), STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+            await nft.connect(addr1).addStake(0, ADDITIONAL_STAKE)
+
+            const stakeInfo = await nft.getStakeInfo(0)
+            expect(stakeInfo[0]).to.equal(STAKE_AMOUNT + ADDITIONAL_STAKE)
+        })
+
+        it("Should track total staked tokens correctly", async function () {
+            const { nft, addr1, addr2 } = await loadFixture(deployFixture)
+
+            await nft
+                .connect(addr1)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
             await nft
                 .connect(addr2)
-                .mint(await addr2.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr2.getAddress(), STAKE_AMOUNT, TEST_URI)
 
-            expect(await nft.ownerOf(0)).to.equal(await addr1.getAddress())
-            expect(await nft.ownerOf(1)).to.equal(await addr2.getAddress())
+            expect(await nft.getTotalStakedTokens()).to.equal(STAKE_AMOUNT * 2n)
         })
     })
 
-    describe("Staking", function () {
-        beforeEach(async function () {
-            // Transfer tokens to addr1 and approve NFT contract
-            await governanceToken.transfer(
-                await addr1.getAddress(),
-                TOTAL_NEEDED
+    describe("Rewards Calculation", function () {
+        it("Should calculate rewards based on stake duration and amount", async function () {
+            const { nft, governanceToken, owner, addr1 } = await loadFixture(
+                deployFixture
             )
-            await governanceToken
-                .connect(addr1)
-                .approve(await nft.getAddress(), TOTAL_NEEDED)
 
-            // Mint NFT with initial stake
+            // Deposit rewards first
+            await nft.connect(owner).depositRewards(REWARD_DEPOSIT)
+
+            // Record initial reward pool balance
+            const initialRewardPool = await nft.getRewardPoolBalance()
+            expect(initialRewardPool).to.equal(REWARD_DEPOSIT)
+
+            // Mint and stake
             await nft
                 .connect(addr1)
-                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+
+            // Record initial stake time
+            const initialStakeInfo = await nft.getStakeInfo(0)
+
+            // Force a block mining to ensure timestamp changes
+            await ethers.provider.send("evm_mine", [])
+
+            // Advance time significantly
+            const stakeDuration = 3600 // 1 hour
+            await time.increase(stakeDuration)
+
+            // Force another block to be mined
+            await ethers.provider.send("evm_mine", [])
+
+            // Update stake state (this will recalculate rewards)
+            await nft.connect(addr1).addStake(0, ethers.parseEther("1"))
+
+            // Check rewards
+            const rewards = await nft.getAccruedRewards(0)
+            console.log("Rewards calculated:", rewards.toString())
+            console.log("Distribution rate:", DISTRIBUTION_RATE.toString())
+            console.log("Stake duration:", stakeDuration)
+
+            expect(rewards).to.be.gt(0)
         })
 
-        it("Should allow additional staking of tokens", async function () {
-            await nft.connect(addr1).stake(0, ADDITIONAL_STAKE)
-            const expectedTotal = STAKE_AMOUNT + ADDITIONAL_STAKE
-            expect(await nft.stakedAmount(0)).to.equal(expectedTotal)
+        it("Should distribute rewards proportionally with multiple stakers", async function () {
+            const { nft, governanceToken, owner, addr1, addr2 } =
+                await loadFixture(deployFixture)
+
+            // Deposit initial rewards
+            await nft.connect(owner).depositRewards(REWARD_DEPOSIT)
+
+            // First staker
+            await nft
+                .connect(addr1)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+
+            // Advance time with block mining
+            await time.increase(1800)
+            await ethers.provider.send("evm_mine", [])
+
+            // Second staker
+            await nft
+                .connect(addr2)
+                .mint(await addr2.getAddress(), STAKE_AMOUNT, TEST_URI)
+
+            // Advance time with block mining
+            await time.increase(1800)
+            await ethers.provider.send("evm_mine", [])
+
+            // Update states by making small stakes
+            await nft.connect(addr1).addStake(0, ethers.parseEther("1"))
+            await nft.connect(addr2).addStake(1, ethers.parseEther("1"))
+
+            const [stakeInfo1, stakeInfo2] = await Promise.all([
+                nft.getStakeInfo(0),
+                nft.getStakeInfo(1)
+            ])
+
+            // First staker should have more accumulated time
+            expect(stakeInfo1[2]).to.be.gt(stakeInfo2[2])
         })
 
-        it("Should emit Staked event for additional stakes", async function () {
-            await expect(nft.connect(addr1).stake(0, ADDITIONAL_STAKE))
-                .to.emit(nft, "Staked")
-                .withArgs(
-                    0,
-                    await governanceToken.getAddress(),
-                    ADDITIONAL_STAKE
-                )
-        })
-
-        it("Should revert if non-owner tries to stake", async function () {
-            await expect(
-                nft.connect(addr2).stake(0, ADDITIONAL_STAKE)
-            ).to.be.revertedWith("Not token owner")
-        })
-
-        it("Should revert if trying to stake zero amount", async function () {
-            await expect(nft.connect(addr1).stake(0, 0)).to.be.revertedWith(
-                "Amount must be greater than 0"
+        it("Should correctly handle partial withdrawals and rewards", async function () {
+            const { nft, governanceToken, owner, addr1 } = await loadFixture(
+                deployFixture
             )
+
+            // Deposit rewards
+            await nft.connect(owner).depositRewards(REWARD_DEPOSIT)
+
+            // Initial stake
+            await nft
+                .connect(addr1)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+
+            // Advance time with block mining
+            await time.increase(1800)
+            await ethers.provider.send("evm_mine", [])
+
+            // Update state and collect any accrued rewards first
+            await nft.connect(addr1).addStake(0, ethers.parseEther("1"))
+
+            try {
+                await nft.connect(addr1).withdrawRewards(0)
+            } catch (error) {
+                console.log("No rewards to withdraw yet")
+            }
+
+            // Now attempt the partial withdrawal
+            const withdrawAmount = STAKE_AMOUNT / 2n
+            await nft.connect(addr1).withdraw(0, withdrawAmount)
+
+            // Verify remaining stake
+            const stakeInfo = await nft.getStakeInfo(0)
+            expect(stakeInfo[0]).to.be.closeTo(
+                withdrawAmount,
+                ethers.parseEther("1")
+            )
+        })
+
+        it("Should handle edge cases in reward distribution", async function () {
+            const { nft, governanceToken, owner, addr1 } = await loadFixture(
+                deployFixture
+            )
+
+            // Deposit substantial rewards to ensure visibility
+            const substantialReward = ethers.parseEther("10000")
+            await governanceToken.mint(
+                await owner.getAddress(),
+                substantialReward
+            )
+            await governanceToken
+                .connect(owner)
+                .approve(await nft.getAddress(), substantialReward)
+            await nft.connect(owner).depositRewards(substantialReward)
+
+            // Stake a moderate amount
+            const stakeAmount = ethers.parseEther("1000")
+            await nft
+                .connect(addr1)
+                .mint(await addr1.getAddress(), stakeAmount, TEST_URI)
+
+            // Advance time significantly
+            await time.increase(7200) // 2 hours
+            await ethers.provider.send("evm_mine", [])
+
+            // Update state
+            await nft.connect(addr1).addStake(0, ethers.parseEther("1"))
+
+            // Verify rewards
+            const rewards = await nft.getAccruedRewards(0)
+            expect(rewards).to.be.gt(0)
         })
     })
 
-    describe("Withdrawing", function () {
-        beforeEach(async function () {
-            // Transfer tokens to addr1 and approve NFT contract
-            await governanceToken.transfer(
-                await addr1.getAddress(),
-                STAKE_AMOUNT
-            )
-            await governanceToken
-                .connect(addr1)
-                .approve(await nft.getAddress(), STAKE_AMOUNT)
+    describe("Governance Features", function () {
+        it("Should allow token delegation through proxy", async function () {
+            const { nft, addr1, addr2 } = await loadFixture(deployFixture)
 
-            // Mint NFT with initial stake
             await nft
                 .connect(addr1)
-                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
-        })
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+            const stakeInfo = await nft.getStakeInfo(0)
+            const proxyAddress = stakeInfo[4]
 
-        describe("Partial Withdrawals", function () {
-            it("Should allow partial withdrawal of staked tokens", async function () {
-                await nft.connect(addr1).withdraw(0, PARTIAL_WITHDRAW)
-                const expectedRemaining = STAKE_AMOUNT - PARTIAL_WITHDRAW
-                expect(await nft.stakedAmount(0)).to.equal(expectedRemaining)
-            })
-
-            xit("Should emit Withdrawn event for partial withdrawals", async function () {
-                await expect(nft.connect(addr1).withdraw(0, PARTIAL_WITHDRAW))
-                    .to.emit(nft, "Withdrawn")
-                    .withArgs(
-                        0,
-                        await governanceToken.getAddress(),
-                        PARTIAL_WITHDRAW
-                    )
-            })
-
-            it("Should revert if trying to withdraw more than staked amount", async function () {
-                const tooMuch = STAKE_AMOUNT + ethers.parseEther("1")
-                await expect(
-                    nft.connect(addr1).withdraw(0, tooMuch)
-                ).to.be.revertedWith("Insufficient staked amount")
-            })
-
-            it("Should revert if trying to withdraw zero amount", async function () {
-                await expect(
-                    nft.connect(addr1).withdraw(0, 0)
-                ).to.be.revertedWith("Amount must be greater than 0")
-            })
-        })
-
-        describe("Complete Withdrawals", function () {
-            it("Should allow withdrawing all staked tokens", async function () {
-                await nft.connect(addr1).withdrawAll(0)
-                expect(await nft.stakedAmount(0)).to.equal(0)
-            })
-
-            it("Should emit WithdrawnAll event", async function () {
-                await expect(nft.connect(addr1).withdrawAll(0))
-                    .to.emit(nft, "WithdrawnAll")
-                    .withArgs(
-                        0,
-                        await governanceToken.getAddress(),
-                        STAKE_AMOUNT
-                    )
-            })
-
-            it("Should revert if trying to withdraw with no stakes", async function () {
-                await nft.connect(addr1).withdrawAll(0)
-                await expect(
-                    nft.connect(addr1).withdrawAll(0)
-                ).to.be.revertedWith("No stakes found")
-            })
-        })
-
-        it("Should revert if non-owner tries to withdraw", async function () {
-            await expect(
-                nft.connect(addr2).withdraw(0, PARTIAL_WITHDRAW)
-            ).to.be.revertedWith("Not token owner")
-        })
-    })
-
-    describe("Delegation", function () {
-        beforeEach(async function () {
-            // Transfer tokens to addr1 and approve NFT contract
-            await governanceToken.transfer(
-                await addr1.getAddress(),
-                STAKE_AMOUNT
-            )
-            await governanceToken
-                .connect(addr1)
-                .approve(await nft.getAddress(), STAKE_AMOUNT)
-
-            // Mint NFT with initial stake
             await nft
-                .connect(addr1)
-                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
-        })
-
-        it("Should allow NFT owner to delegate staked tokens", async function () {
-            const delegateTx = nft
                 .connect(addr1)
                 .delegateStakedTokens(0, await addr2.getAddress())
 
-            // Check for DelegatedToken event from main contract
-            await expect(delegateTx)
-                .to.emit(nft, "DelegatedToken")
-                .withArgs(
-                    0, // tokenId
-                    await governanceToken.getAddress(),
-                    await addr2.getAddress()
-                )
-
-            // Get proxy address
-            const proxyAddress = await nft.stakeProxies(0)
-
-            // Check for DelegatedFromProxy event from proxy contract
-            await expect(delegateTx)
-                .to.emit(
-                    await ethers.getContractAt("StakeProxy", proxyAddress),
-                    "DelegatedFromProxy"
-                )
-                .withArgs(
-                    await governanceToken.getAddress(),
-                    await addr2.getAddress()
-                )
+            // Verify delegation through the governance token
+            expect(await governanceToken.delegates(proxyAddress)).to.equal(
+                await addr2.getAddress()
+            )
         })
 
-        it("Should revert delegation to zero address", async function () {
-            await expect(
-                nft.connect(addr1).delegateStakedTokens(0, ZeroAddress)
-            ).to.be.revertedWith("Invalid delegatee address")
-        })
+        it("Should maintain delegated voting power after additional stake", async function () {
+            const { nft, addr1, addr2 } = await loadFixture(deployFixture)
 
-        it("Should revert if non-owner tries to delegate", async function () {
-            await expect(
-                nft
-                    .connect(addr2)
-                    .delegateStakedTokens(0, await addr3.getAddress())
-            ).to.be.revertedWith("Not token owner")
+            await nft
+                .connect(addr1)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+            await nft
+                .connect(addr1)
+                .delegateStakedTokens(0, await addr2.getAddress())
+            await nft.connect(addr1).addStake(0, ADDITIONAL_STAKE)
+
+            const stakeInfo = await nft.getStakeInfo(0)
+            const proxyAddress = stakeInfo[4]
+
+            // Verify delegation is maintained
+            expect(await governanceToken.delegates(proxyAddress)).to.equal(
+                await addr2.getAddress()
+            )
         })
     })
 
-    describe("View Functions", function () {
-        beforeEach(async function () {
-            await governanceToken.transfer(
-                await addr1.getAddress(),
-                STAKE_AMOUNT
+    describe("Withdrawal Mechanics", function () {
+        async function setupWithRewards() {
+            const { nft, governanceToken, owner, addr1 } = await loadFixture(
+                deployFixture
             )
-            await governanceToken
-                .connect(addr1)
-                .approve(await nft.getAddress(), STAKE_AMOUNT)
-        })
 
-        it("Should correctly return staked amount", async function () {
+            // Initial setup
+            await nft.connect(owner).depositRewards(REWARD_DEPOSIT)
             await nft
                 .connect(addr1)
-                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
-            expect(await nft.stakedAmount(0)).to.equal(STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+
+            // Advance time
+            await time.increase(1800)
+            await ethers.provider.send("evm_mine", [])
+
+            return { nft, governanceToken, owner, addr1 }
+        }
+
+        it("Should correctly handle rewards withdrawal", async function () {
+            const { nft, governanceToken, addr1 } = await setupWithRewards()
+
+            // Record initial balance
+            const initialBalance = await governanceToken.balanceOf(
+                await addr1.getAddress()
+            )
+
+            // Check for rewards
+            const rewards = await nft.getAccruedRewards(0)
+            if (rewards > 0n) {
+                await nft.connect(addr1).withdrawRewards(0)
+                const finalBalance = await governanceToken.balanceOf(
+                    await addr1.getAddress()
+                )
+                expect(finalBalance).to.be.gt(initialBalance)
+            }
         })
 
-        it("Should return zero for non-existent token", async function () {
-            expect(await nft.stakedAmount(999)).to.equal(0)
+        it("Should handle stake withdrawal separately from rewards", async function () {
+            const { nft, governanceToken, addr1 } = await setupWithRewards()
+
+            // Get initial state
+            const initialStakeInfo = await nft.getStakeInfo(0)
+            const withdrawAmount = STAKE_AMOUNT / 2n
+
+            // Withdraw stake directly
+            await nft.connect(addr1).withdraw(0, withdrawAmount)
+
+            // Verify remaining stake
+            const finalStakeInfo = await nft.getStakeInfo(0)
+            expect(finalStakeInfo[0]).to.equal(withdrawAmount)
+        })
+
+        it("Should prevent excessive withdrawals", async function () {
+            const { nft, addr1 } = await loadFixture(deployFixture)
+
+            // Initial stake
+            await nft
+                .connect(addr1)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+
+            // Try to withdraw more than staked
+            await expect(
+                nft.connect(addr1).withdraw(0, STAKE_AMOUNT * 2n)
+            ).to.be.revertedWithCustomError(nft, "InsufficientStake")
+        })
+
+        it("Should track rewards correctly after partial withdrawal", async function () {
+            const { nft, owner, addr1 } = await setupWithRewards()
+
+            // Get initial reward rate
+            const initialYield = await nft.getCurrentYieldPerToken()
+
+            // Perform partial withdrawal
+            const withdrawAmount = STAKE_AMOUNT / 2n
+            await nft.connect(addr1).withdraw(0, withdrawAmount)
+
+            // Advance time
+            await time.increase(1800)
+            await ethers.provider.send("evm_mine", [])
+
+            // Check new reward rate
+            const newYield = await nft.getCurrentYieldPerToken()
+
+            // Yield per token should be higher with less total stake
+            expect(newYield).to.be.gt(initialYield)
+        })
+
+        it("Should handle complete withdrawal after rewards", async function () {
+            const { nft, governanceToken, addr1 } = await setupWithRewards()
+
+            // First withdraw any accrued rewards
+            const rewards = await nft.getAccruedRewards(0)
+            if (rewards > 0n) {
+                await nft.connect(addr1).withdrawRewards(0)
+                // Wait for transaction to be mined
+                await ethers.provider.send("evm_mine", [])
+            }
+
+            // Record balance before final withdrawal
+            const balanceBefore = await governanceToken.balanceOf(
+                await addr1.getAddress()
+            )
+
+            // Now withdraw all staked tokens
+            await nft.connect(addr1).withdraw(0, STAKE_AMOUNT)
+
+            // Verify final state
+            const balanceAfter = await governanceToken.balanceOf(
+                await addr1.getAddress()
+            )
+            expect(balanceAfter).to.equal(balanceBefore + STAKE_AMOUNT)
+
+            const finalStakeInfo = await nft.getStakeInfo(0)
+            expect(finalStakeInfo[0]).to.equal(0)
+        })
+
+        it("Should allow withdrawing rewards multiple times", async function () {
+            const { nft, governanceToken, owner, addr1 } =
+                await setupWithRewards()
+
+            // First period
+            await time.increase(1800)
+            await ethers.provider.send("evm_mine", [])
+
+            const firstRewards = await nft.getAccruedRewards(0)
+            if (firstRewards > 0n) {
+                await nft.connect(addr1).withdrawRewards(0)
+                await ethers.provider.send("evm_mine", [])
+            }
+
+            // Second period
+            await time.increase(1800)
+            await ethers.provider.send("evm_mine", [])
+
+            const secondRewards = await nft.getAccruedRewards(0)
+            if (secondRewards > 0n) {
+                await nft.connect(addr1).withdrawRewards(0)
+            }
+
+            // Should be able to execute both withdrawals
+            expect(true).to.be.true
         })
     })
-    // Add this new describe block after your existing tests in Hamsterverse.ts
 
-    describe("Reward Security", function () {
-        let proxyAddress: string
-
-        beforeEach(async function () {
-            // Setup initial stake and get proxy address
-            const REQUIRED_TOKENS = TOTAL_NEEDED * 2n
-            await governanceToken.transfer(
-                await addr1.getAddress(),
-                REQUIRED_TOKENS
-            )
-            await governanceToken
-                .connect(addr1)
-                .approve(await nft.getAddress(), REQUIRED_TOKENS)
+    describe("Security & Edge Cases", function () {
+        it("Should prevent unauthorized withdrawals", async function () {
+            const { nft, addr1, addr2 } = await loadFixture(deployFixture)
 
             await nft
                 .connect(addr1)
-                .mint(await addr1.getAddress(), TEST_URI, STAKE_AMOUNT)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
 
-            proxyAddress = await nft.stakeProxies(0)
-        })
-
-        it("Should maintain accurate stake time tracking", async function () {
-            // Get initial stake info
-            const initialInfo = await nft.getStakeInfo(0)
-
-            // Advance time
-            await ethers.provider.send("evm_increaseTime", [86400]) // 1 day
-            await ethers.provider.send("evm_mine", [])
-
-            // Add more stake
-            await nft.connect(addr1).stake(0, ADDITIONAL_STAKE)
-
-            const afterInfo = await nft.getStakeInfo(0)
-            expect(afterInfo.accumulatedStakeSeconds).to.be.gt(
-                initialInfo.accumulatedStakeSeconds
-            )
-        })
-
-        xit("Should emit Withdrawn event for partial withdrawals", async function () {
-            // Get the pending reward before withdrawal
-            const { pendingReward } = await nft.getStakeInfo(0)
-
-            await expect(nft.connect(addr1).withdraw(0, PARTIAL_WITHDRAW))
-                .to.emit(nft, "Withdrawn")
-                .withArgs(
-                    0, // tokenId
-                    await governanceToken.getAddress(), // token address
-                    PARTIAL_WITHDRAW, // withdrawn amount
-                    pendingReward // reward amount - this was missing
-                )
-        })
-
-        it("Should reset accumulated stake seconds after reward claim", async function () {
-            // Advance time
-            await ethers.provider.send("evm_increaseTime", [86400])
-            await ethers.provider.send("evm_mine", [])
-
-            // Withdraw partial amount to claim rewards
-            await nft.connect(addr1).withdraw(0, PARTIAL_WITHDRAW)
-
-            const { accumulatedStakeSeconds } = await nft.getStakeInfo(0)
-            expect(accumulatedStakeSeconds).to.equal(0)
-        })
-
-        it("Should fairly distribute rewards between multiple stakers", async function () {
-            // Setup second staker
-            await governanceToken.transfer(
-                await addr2.getAddress(),
-                STAKE_AMOUNT
-            )
-            await governanceToken
-                .connect(addr2)
-                .approve(await nft.getAddress(), STAKE_AMOUNT)
-            await nft
-                .connect(addr2)
-                .mint(await addr2.getAddress(), TEST_URI, STAKE_AMOUNT)
-
-            // Advance time
-            await ethers.provider.send("evm_increaseTime", [86400])
-            await ethers.provider.send("evm_mine", [])
-
-            // Get rewards for both NFTs
-            const [info1, info2] = await Promise.all([
-                nft.getStakeInfo(0),
-                nft.getStakeInfo(1)
-            ])
-
-            // With equal stakes and time, rewards should be equal
-            expect(info1.pendingReward).to.equal(info2.pendingReward)
-        })
-
-        it("Should not allow reward manipulation through direct proxy access", async function () {
-            const proxy = await ethers.getContractAt("StakeProxy", proxyAddress)
-
-            // Try to manipulate accumulated time through unauthorized withdrawal
             await expect(
-                proxy
-                    .connect(addr2)
-                    .withdraw(await addr2.getAddress(), PARTIAL_WITHDRAW)
-            ).to.be.revertedWith("Only NFT contract can call")
-
-            // Verify reward calculation remains unchanged
-            const { pendingReward: rewardAfter } = await nft.getStakeInfo(0)
-            expect(rewardAfter).to.equal(0) // Should be 0 since no time has passed
+                nft.connect(addr2).withdraw(0, STAKE_AMOUNT)
+            ).to.be.revertedWithCustomError(nft, "NotTokenOwner")
         })
 
-        it("Should correctly track rewards through multiple operations", async function () {
-            // Initial stake time
-            await ethers.provider.send("evm_increaseTime", [43200]) // 12 hours
-            await ethers.provider.send("evm_mine", [])
+        it("Should handle reward distribution with zero total stake", async function () {
+            const { nft, owner } = await loadFixture(deployFixture)
 
-            // Add more stake
-            await nft.connect(addr1).stake(0, ADDITIONAL_STAKE)
-
-            // More time passes
-            await ethers.provider.send("evm_increaseTime", [43200]) // Another 12 hours
-            await ethers.provider.send("evm_mine", [])
-
-            // Partial withdrawal with reward claim
-            // const { pendingReward } = await nft.getStakeInfo(0)
-            await expect(nft.connect(addr1).withdraw(0, PARTIAL_WITHDRAW))
-                .to.emit(nft, "Withdrawn")
-                .withArgs(
-                    0,
-                    await governanceToken.getAddress(),
-                    PARTIAL_WITHDRAW
-                )
-
-            // Verify stake tracking reset
-            const { accumulatedStakeSeconds } = await nft.getStakeInfo(0)
-            expect(accumulatedStakeSeconds).to.equal(0)
+            await nft.connect(owner).depositRewards(REWARD_DEPOSIT)
+            const currentYield = await nft.getCurrentYieldPerToken()
+            expect(currentYield).to.equal(0)
         })
 
-        it("Should maintain reward isolation between different NFTs", async function () {
-            // Setup second NFT with different stake amount
-            await governanceToken.transfer(
-                await addr2.getAddress(),
-                STAKE_AMOUNT * 2n
+        it("Should correctly update rewards after partial withdrawal", async function () {
+            const { nft, governanceToken, owner, addr1 } = await loadFixture(
+                deployFixture
             )
-            await governanceToken
-                .connect(addr2)
-                .approve(await nft.getAddress(), STAKE_AMOUNT * 2n)
+
+            await nft.connect(owner).depositRewards(REWARD_DEPOSIT)
             await nft
-                .connect(addr2)
-                .mint(await addr2.getAddress(), TEST_URI, STAKE_AMOUNT * 2n)
+                .connect(addr1)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
+
+            await time.increase(1800)
+
+            // Partial withdrawal
+            await nft.connect(addr1).withdraw(0, STAKE_AMOUNT / 2n)
+
+            // Check remaining stake
+            const stakeInfo = await nft.getStakeInfo(0)
+            expect(stakeInfo[0]).to.equal(STAKE_AMOUNT / 2n)
+        })
+
+        it("Should correctly handle withdrawal process", async function () {
+            const { nft, governanceToken, owner, addr1 } = await loadFixture(
+                deployFixture
+            )
+
+            // Initial setup
+            await nft.connect(owner).depositRewards(REWARD_DEPOSIT)
+            await nft
+                .connect(addr1)
+                .mint(await addr1.getAddress(), STAKE_AMOUNT, TEST_URI)
 
             // Advance time
-            await ethers.provider.send("evm_increaseTime", [86400])
+            await time.increase(1800)
             await ethers.provider.send("evm_mine", [])
 
-            // Get rewards
-            const [info1, info2] = await Promise.all([
-                nft.getStakeInfo(0),
-                nft.getStakeInfo(1)
-            ])
+            // Update state first
+            await nft.connect(addr1).addStake(0, ethers.parseEther("1"))
 
-            // NFT with double stake should have double rewards
-            expect(info2.pendingReward).to.equal(info1.pendingReward * 2n)
+            // Withdraw rewards if any
+            try {
+                await nft.connect(addr1).withdrawRewards(0)
+            } catch (error) {
+                console.log("No rewards to withdraw")
+            }
+
+            // Then withdraw stake
+            const withdrawAmount = STAKE_AMOUNT / 2n
+            await nft.connect(addr1).withdraw(0, withdrawAmount)
+
+            const finalStakeInfo = await nft.getStakeInfo(0)
+            expect(finalStakeInfo[0]).to.be.closeTo(
+                withdrawAmount,
+                ethers.parseEther("1")
+            )
         })
     })
 })

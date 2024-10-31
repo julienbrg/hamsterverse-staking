@@ -12,8 +12,6 @@ import "./IStakeProxy.sol";
  * @dev Implementation of proxy contract to hold staked tokens
  */
 contract StakeProxy is IStakeProxy {
-    using SafeERC20 for IERC20;
-
     address public immutable nft;
     address public immutable token;
     uint256 public immutable tokenId;
@@ -21,20 +19,19 @@ contract StakeProxy is IStakeProxy {
     event DelegatedFromProxy(address indexed token, address indexed delegatee);
 
     modifier onlyNFT() {
-        require(msg.sender == nft, "Only NFT contract can call");
+        if (msg.sender != nft) revert NotTokenOwner(tokenId, msg.sender);
         _;
     }
 
     constructor(address _nft, address _token, uint256 _tokenId) {
-        require(_nft != address(0), "Invalid NFT address");
-        require(_token != address(0), "Invalid token address");
+        if (_nft == address(0) || _token == address(0)) revert InvalidAddress();
         nft = _nft;
         token = _token;
         tokenId = _tokenId;
     }
 
     function delegate(address delegatee) external override onlyNFT {
-        require(delegatee != address(0), "Invalid delegatee address");
+        if (delegatee == address(0)) revert InvalidAddress();
 
         (bool success, ) = token.call(abi.encodeWithSignature("delegate(address)", delegatee));
         require(success, "Delegation failed");
@@ -43,8 +40,8 @@ contract StakeProxy is IStakeProxy {
     }
 
     function withdraw(address to, uint256 amount) external override onlyNFT {
-        require(to != address(0), "Invalid recipient");
-        IERC20(token).safeTransfer(to, amount);
+        if (to == address(0)) revert InvalidAddress();
+        IERC20(token).transfer(to, amount);
     }
 
     function getBalance() external view override returns (uint256) {

@@ -84,7 +84,7 @@ export default async ({ getNamedAccounts, deployments }: any) => {
         }
     }
 
-    const hamsterverse = await deploy("Hamsterverse", {
+    const hamsterverse = await deploy("HamsterverseStakingNFT", {
         from: deployer,
         args: [mockToken.address],
         log: true,
