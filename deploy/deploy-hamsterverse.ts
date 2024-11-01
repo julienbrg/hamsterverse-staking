@@ -7,68 +7,68 @@ function wait(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+const GOVERNANCE_TOKEN_ADDRESS = "0x11dc980faf34a1d082ae8a6a883db3a950a3c6e8"
+const DISTRIBUTION_RATE = hre.ethers.parseEther("1") // 1 token per second
+
 export default async ({ getNamedAccounts, deployments }: any) => {
     const { deploy } = deployments
     const { deployer } = await getNamedAccounts()
     console.log("Deployer:", deployer)
 
-    const mockToken = await deploy("MockERC20", {
-        from: deployer,
-        args: [],
-        log: true,
-        waitConfirmations: 1
-    })
-
     const verificationConfig = {
         sepolia: {
             waitTime: 90,
-            explorerUrl: "https://sepolia.etherscan.io/address/"
-        },
-        optimism: {
-            waitTime: 20,
-            explorerUrl: "https://optimistic.etherscan.io/address/"
+            explorerUrl: "https://sepolia.etherscan.io/address/",
+            needsMockToken: true
         },
         "op-sepolia": {
             waitTime: 90,
-            explorerUrl: "https://sepolia-optimism.etherscan.io/address/"
+            explorerUrl: "https://sepolia-optimism.etherscan.io/address/",
+            needsMockToken: true
+        },
+        optimism: {
+            waitTime: 20,
+            explorerUrl: "https://optimistic.etherscan.io/address/",
+            needsMockToken: false
         },
         base: {
             waitTime: 20,
-            explorerUrl: "https://basescan.org/address/"
+            explorerUrl: "https://basescan.org/address/",
+            needsMockToken: false
         }
     }
 
     const currentNetwork = hre.network.name as keyof typeof verificationConfig
 
-    if (currentNetwork in verificationConfig) {
+    if (!(currentNetwork in verificationConfig)) {
+        throw new Error(`Unsupported network: ${currentNetwork}`)
+    }
+
+    let governanceTokenAddress: string
+
+    // Deploy MockToken only on test networks
+    if (verificationConfig[currentNetwork].needsMockToken) {
+        const mockToken = await deploy("MockERC20", {
+            from: deployer,
+            args: [],
+            log: true,
+            waitConfirmations: 1
+        })
+
+        governanceTokenAddress = mockToken.address
+
+        console.log(
+            "\nMockERC20 token contract deployed to",
+            currentNetwork + ":",
+            msg(mockToken.address)
+        )
+        console.log(
+            "View on block explorer:",
+            verificationConfig[currentNetwork].explorerUrl + mockToken.address
+        )
+
+        // Verify MockToken
         try {
-            console.log(
-                "\nMockERC20 token contract deployed to",
-                currentNetwork + ":",
-                msg(mockToken.address)
-            )
-            console.log(
-                "View on block explorer:",
-                verificationConfig[currentNetwork].explorerUrl +
-                    mockToken.address
-            )
-
-            console.log("\nMinting initial tokens...")
-            const tokenContract = await hre.ethers.getContractAt(
-                "MockERC20",
-                mockToken.address
-            )
-            const amount = hre.ethers.parseEther("10000")
-
-            const mintTx = await tokenContract.mint(deployer, amount)
-            await mintTx.wait(1)
-
-            console.log(
-                `Minted ${hre.ethers.formatEther(amount)} tokens to ${deployer}`
-            )
-
-            await wait(5000)
-
             console.log("\nEtherscan verification in progress...")
             await wait(verificationConfig[currentNetwork].waitTime * 1000)
 
@@ -78,82 +78,95 @@ export default async ({ getNamedAccounts, deployments }: any) => {
                 constructorArguments: []
             })
 
-            console.log("Etherscan verification done. ✅")
+            console.log("MockToken verification done. ✅")
         } catch (error) {
-            console.error("Verification error:", error)
+            console.error("MockToken verification error:", error)
         }
-    }
 
-    const hamsterverse = await deploy("Hamsterverse", {
-        from: deployer,
-        args: [mockToken.address],
-        log: true,
-        waitConfirmations: 1
-    })
-
-    if (currentNetwork in verificationConfig) {
-        try {
-            console.log(
-                "\nHamsterverse contract deployed to",
-                currentNetwork + ":",
-                msg(hamsterverse.address)
-            )
-            console.log(
-                "View on block explorer:",
-                verificationConfig[currentNetwork].explorerUrl +
-                    hamsterverse.address
-            )
-
-            console.log("\nApproving and minting initial NFT...")
+        // For test networks, mint initial supply and deposit rewards
+        if (verificationConfig[currentNetwork].needsMockToken) {
             const tokenContract = await hre.ethers.getContractAt(
                 "MockERC20",
                 mockToken.address
             )
-            const nftContract = await hre.ethers.getContractAt(
-                "Hamsterverse",
-                hamsterverse.address
-            )
-
-            const uri =
-                "ipfs://bafkreiglxpmys7hxse45nd3ajnjzq2vjjevrlwjphtcco3pd53eq6zqu5i"
-            const stakeAmount = hre.ethers.parseEther("200")
-
-            const gasPrice = (await hre.ethers.provider.getFeeData()).gasPrice
-            const increasedGasPrice = gasPrice
-                ? (gasPrice * 120n) / 100n
-                : undefined
-
-            const approveTx = await tokenContract.approve(
-                hamsterverse.address,
-                stakeAmount,
-                {
-                    gasPrice: increasedGasPrice
-                }
-            )
-            await approveTx.wait(1)
-            console.log("Approved token spending")
-
-            await wait(5000)
-
-            const mintTx = await nftContract.mint(deployer, uri, stakeAmount, {
-                gasPrice: increasedGasPrice
-            })
+            const amount = hre.ethers.parseEther("10000")
+            const mintTx = await tokenContract.mint(deployer, amount)
             await mintTx.wait(1)
-            console.log("Minted NFT #0")
-
-            console.log("\nEtherscan verification in progress...")
-            await wait(verificationConfig[currentNetwork].waitTime * 1000)
-
-            await hre.run("verify:verify", {
-                network: network.name,
-                address: hamsterverse.address,
-                constructorArguments: [mockToken.address]
-            })
-
-            console.log("Etherscan verification done. ✅")
-        } catch (error) {
-            console.error("Verification error:", error)
+            console.log(
+                `\nMinted ${hre.ethers.formatEther(
+                    amount
+                )} tokens to ${deployer}`
+            )
         }
+    } else {
+        // Use existing governance token on mainnet networks
+        governanceTokenAddress = GOVERNANCE_TOKEN_ADDRESS
+    }
+
+    // Deploy HamsterverseStakingNFT
+    const hamsterverse = await deploy("HamsterverseStakingNFT", {
+        from: deployer,
+        args: [governanceTokenAddress, DISTRIBUTION_RATE, deployer],
+        log: true,
+        waitConfirmations: 1
+    })
+
+    console.log(
+        "\nHamsterverse contract deployed to",
+        currentNetwork + ":",
+        msg(hamsterverse.address)
+    )
+    console.log(
+        "View on block explorer:",
+        verificationConfig[currentNetwork].explorerUrl + hamsterverse.address
+    )
+
+    // Deposit initial rewards only on test networks
+    if (verificationConfig[currentNetwork].needsMockToken) {
+        console.log("\nDepositing initial rewards...")
+        const tokenContract = await hre.ethers.getContractAt(
+            "MockERC20",
+            governanceTokenAddress
+        )
+        const nftContract = await hre.ethers.getContractAt(
+            "HamsterverseStakingNFT",
+            hamsterverse.address
+        )
+
+        const rewardAmount = hre.ethers.parseEther("1000")
+        const approveTx = await tokenContract.approve(
+            hamsterverse.address,
+            rewardAmount
+        )
+        await approveTx.wait(1)
+
+        const depositTx = await nftContract.depositRewards(rewardAmount)
+        await depositTx.wait(1)
+        console.log(
+            `Deposited ${hre.ethers.formatEther(
+                rewardAmount
+            )} tokens as rewards`
+        )
+    }
+
+    // Verify HamsterverseStakingNFT
+    try {
+        console.log("\nEtherscan verification in progress...")
+        await wait(verificationConfig[currentNetwork].waitTime * 1000)
+
+        await hre.run("verify:verify", {
+            network: network.name,
+            address: hamsterverse.address,
+            constructorArguments: [
+                governanceTokenAddress,
+                DISTRIBUTION_RATE,
+                deployer
+            ]
+        })
+
+        console.log("HamsterverseStakingNFT verification done. ✅")
+    } catch (error) {
+        console.error("HamsterverseStakingNFT verification error:", error)
     }
 }
 
