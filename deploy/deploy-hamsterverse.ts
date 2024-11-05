@@ -2,6 +2,8 @@ import "@nomiclabs/hardhat-ethers"
 import color from "cli-color"
 const msg = color.xterm(39).bgXterm(128)
 import hre, { network } from "hardhat"
+import { existsSync, readFileSync } from "fs"
+import path from "path"
 
 function wait(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
@@ -46,8 +48,28 @@ export default async ({ getNamedAccounts, deployments }: any) => {
 
     let governanceTokenAddress: string
 
-    // Deploy MockToken only on test networks
-    if (verificationConfig[currentNetwork].needsMockToken) {
+    // For Sepolia, use the existing MockERC20 address
+    if (currentNetwork === "sepolia") {
+        const mockTokenDeploymentPath = path.join(
+            __dirname,
+            "../deployments/sepolia/MockERC20.json"
+        )
+
+        if (!existsSync(mockTokenDeploymentPath)) {
+            throw new Error("MockERC20 deployment file not found for Sepolia")
+        }
+
+        const mockTokenDeployment = JSON.parse(
+            readFileSync(mockTokenDeploymentPath, "utf8")
+        )
+        governanceTokenAddress = mockTokenDeployment.address
+        console.log(
+            "\nUsing existing MockERC20 token on Sepolia:",
+            msg(governanceTokenAddress)
+        )
+    }
+    // Deploy MockToken only on other test networks
+    else if (verificationConfig[currentNetwork].needsMockToken) {
         const mockToken = await deploy("MockERC20", {
             from: deployer,
             args: [],
@@ -83,21 +105,17 @@ export default async ({ getNamedAccounts, deployments }: any) => {
             console.error("MockToken verification error:", error)
         }
 
-        // For test networks, mint initial supply and deposit rewards
-        if (verificationConfig[currentNetwork].needsMockToken) {
-            const tokenContract = await hre.ethers.getContractAt(
-                "MockERC20",
-                mockToken.address
-            )
-            const amount = hre.ethers.parseEther("10000")
-            const mintTx = await tokenContract.mint(deployer, amount)
-            await mintTx.wait(1)
-            console.log(
-                `\nMinted ${hre.ethers.formatEther(
-                    amount
-                )} tokens to ${deployer}`
-            )
-        }
+        // For test networks, mint initial supply
+        const tokenContract = await hre.ethers.getContractAt(
+            "MockERC20",
+            mockToken.address
+        )
+        const amount = hre.ethers.parseEther("10000")
+        const mintTx = await tokenContract.mint(deployer, amount)
+        await mintTx.wait(1)
+        console.log(
+            `\nMinted ${hre.ethers.formatEther(amount)} tokens to ${deployer}`
+        )
     } else {
         // Use existing governance token on mainnet networks
         governanceTokenAddress = GOVERNANCE_TOKEN_ADDRESS
@@ -121,8 +139,11 @@ export default async ({ getNamedAccounts, deployments }: any) => {
         verificationConfig[currentNetwork].explorerUrl + hamsterverse.address
     )
 
-    // Deposit initial rewards only on test networks
-    if (verificationConfig[currentNetwork].needsMockToken) {
+    // Deposit initial rewards only on test networks except Sepolia
+    if (
+        verificationConfig[currentNetwork].needsMockToken &&
+        currentNetwork !== "sepolia"
+    ) {
         console.log("\nDepositing initial rewards...")
         const tokenContract = await hre.ethers.getContractAt(
             "MockERC20",
