@@ -4,6 +4,10 @@ Allows users to stake governance tokens in an NFT.
 
 Metadata: https://bafkreiglxpmys7hxse45nd3ajnjzq2vjjevrlwjphtcco3pd53eq6zqu5i.ipfs.w3s.link/
 
+You can check out the [Admin Guide](https://github.com/julienbrg/hamsterverse-staking/blob/main/ADMIN.md) to learn how to setup your contract.
+
+Nov 1, 2024 contract instance (used in UI for demo day): [0x41F1cC5574191482Ce5A60Df5aE90E37A41319a4](https://sepolia.etherscan.io/address/0x41F1cC5574191482Ce5A60Df5aE90E37A41319a4#code)
+
 ## Supported networks
 
 -   [OP Mainnet](https://chainlist.org/chain/10) ([docs](https://docs.optimism.io/chain/networks#op-mainnet))
